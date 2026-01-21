@@ -16,17 +16,7 @@ load_dotenv()
 # Initialize Database
 init_db()
 
-#--- LLM INITIALIZATION ---
-@st.cache_resource
-def get_llm():
-    api_key = os.getenv("GROQ_API_KEY")
-    if api_key:
-        return ChatGroq(
-            model="llama-3.1-8b-instant",
-            temperature=0.3,
-            api_key=api_key
-        )
-    return None
+
 # --- REALISTIC UI CONFIG ---
 st.set_page_config(page_title="BHOOMIKA R", layout="wide", page_icon="💎")
 
@@ -66,6 +56,18 @@ def add_bg_and_style():
     )
 
 add_bg_and_style()
+
+ #--- LLM INITIALIZATION ---
+@st.cache_resource
+def get_llm():
+    api_key = os.getenv("GROQ_API_KEY")
+    if api_key:
+        return ChatGroq(
+            model="llama-3.1-8b-instant",
+            temperature=0.3,
+            api_key=api_key
+        )
+    return None
 
 # --- SESSION STATE ---
 if "logged_in" not in st.session_state:
@@ -134,122 +136,115 @@ else:
             </div>
             """, unsafe_allow_html=True)
 
+                             
     elif menu == "AI Chatbot":
-        st.title("🤖 Chat Assistant")
+            st.title("🤖 Chat Assistant")
 
+            # Initialize session state for tracking active forms and the current command
+            if "active_form" not in st.session_state:
+                st.session_state.active_form = None
+            if "current_cmd" not in st.session_state:
+                st.session_state.current_cmd = None
 
+            # 1. Display Chat History
+            for msg in st.session_state.chat_history:
+                with st.chat_message(msg["role"]):
+                    st.write(msg["content"])
 
-        
-        # # Display Chat History
-        # for msg in st.session_state.chat_history:
-        #     with st.chat_message(msg["role"]):
-        #         st.write(msg["content"])
-
-        # prompt = st.chat_input("Check balance, Send money, or Block card...")
-        # if prompt:
-        #     st.session_state.chat_history.append({"role": "user", "content": prompt})
-        #     st.rerun() # Refresh to show user message immediately
-
-        # # Logical responses based on history
-        # if st.session_state.chat_history:
-        #     last_msg = st.session_state.chat_history[-1]
-        #     if last_msg["role"] == "user":
-        #         cmd = last_msg["content"].lower()
-
-        
-        # 1. Display Chat History
-        for msg in st.session_state.chat_history:
-            with st.chat_message(msg["role"]):
-                st.write(msg["content"])
-
-        # 2. Get User Input
-        prompt = st.chat_input("Check balance, Send money, or ask a question...")
-        
-        # 3. ONLY execute if prompt is not None and not empty
-        if prompt:
-            # Add user message to history
-            st.session_state.chat_history.append({"role": "user", "content": prompt})
+            # 2. Get User Input
+            prompt = st.chat_input("Check balance, Send money, block card, or ask a question...")
             
-            # Immediately show the user's message
-            with st.chat_message("user"):
-                st.write(prompt)
+            if prompt:
+                # Add user message to history
+                st.session_state.chat_history.append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.write(prompt)
 
-            cmd = prompt.lower()
-            
-            with st.chat_message("assistant"):
-                # ROUTE A: BANKING ACTIONS
+                cmd = prompt.lower()
+                st.session_state.current_cmd = cmd # Store the prompt to persist through form re-runs
+                
+                # Determine which form to show based on keywords
                 if "balance" in cmd:
-                    with st.form("bal_f"):
-                        p = st.text_input("Verify Password", type="password")
-                        if st.form_submit_button("Show Balance"):
-                            u = get_account(st.session_state.acc_no)
-                            if verify_password(p, u[4]):
-                                st.success(f"✅ Your balance is: **${u[3]:,.2f}**")
-                            else: st.error("Wrong Password")
-
+                    st.session_state.active_form = "balance"
                 elif "send" in cmd or "transfer" in cmd:
-                    with st.form("tx_f"):
-                        to = st.text_input("Recipient Acc")
-                        amt = st.number_input("Amount", min_value=1.0)
-                        p = st.text_input("Pass", type="password")
-                        if st.form_submit_button("Transfer"):
-                            res = transfer_money(st.session_state.acc_no, to, amt, p)
-                            st.info(res)
-
-
-                # 4. GENERAL AI: GROQ LLM (For "What is Machine Learning", etc.)
+                    st.session_state.active_form = "transfer"
+                elif "block" in cmd:
+                    st.session_state.active_form = "block"
                 else:
-                    llm = get_llm()
-                    if llm:
-                        with st.spinner("Consulting AI Engine..."):
-                            response = llm.invoke([HumanMessage(content=prompt)])
-                            st.write(response.content)
-                            st.session_state.chat_history.append({"role": "assistant", "content": response.content})
-                    else:
-                        st.error("LLM not configured. Check your API Key.")
+                    st.session_state.active_form = "llm"
 
-                # 1. BANKING: CHECK BALANCE
-            
+            # 3. Render the Assistant Response or Form based on active_form
+            if st.session_state.active_form:
                 with st.chat_message("assistant"):
-                    if "balance" in cmd:
+                    
+                    # --- CHECK BALANCE LOGIC ---
+                    if st.session_state.active_form == "balance":
                         with st.form("bal_f"):
+                            st.write("Please verify your identity to see balance.")
                             p = st.text_input("Verify Password", type="password")
                             if st.form_submit_button("Show Balance"):
                                 u = get_account(st.session_state.acc_no)
                                 if verify_password(p, u[4]):
-                                    st.balloons()
-                                    st.success(f"✅ Your current balance is: **${u[3]:,.2f}**")
-                                    st.toast("Balance fetched successfully!", icon="💰")
-                                else:
-                                    st.error("Incorrect Password.")
+                                    balance_msg = f"✅ Your current balance is: **${u[3]:,.2f}**"
+                                    st.success(balance_msg)
+                                    st.toast("Balance fetched!", icon="💰")
+                                    st.session_state.chat_history.append({"role": "assistant", "content": balance_msg})
+                                    st.session_state.active_form = None # Reset
+                                else: 
+                                    st.error("Incorrect Password. Please try again.")
 
-                    elif "send" in cmd or "transfer" in cmd:
+                    # --- TRANSFER MONEY LOGIC ---
+                    elif st.session_state.active_form == "transfer":
                         with st.form("tx_f"):
+                            st.write("💸 Money Transfer")
                             to = st.text_input("Recipient Account Number")
                             amt = st.number_input("Amount ($)", min_value=1.0)
                             p = st.text_input("Enter Transaction Password", type="password")
-                            if st.form_submit_button("Confirm Transfer"):
+                            submit = st.form_submit_button("Confirm Transfer")
+                            
+                            if submit:
                                 res = transfer_money(st.session_state.acc_no, to, amt, p)
                                 if "Successful" in res:
                                     st.balloons()
                                     st.success(f"🎉 {res}")
-                                    st.toast("Transaction Written to bankbot.db", icon="🚀")
+                                    st.toast("Transaction recorded in bankbot.db", icon="🚀")
+                                    st.session_state.chat_history.append({"role": "assistant", "content": f"Transfer Successful: {res}"})
+                                    st.session_state.active_form = None # Reset
                                 else:
-                                    st.error(res)
+                                    # This handles the "Password not matching" error from your bank_crud.py
+                                    st.error(f"❌ {res}")
 
-                    elif "block" in cmd:
+                    # --- BLOCK CARD LOGIC ---
+                    elif st.session_state.active_form == "block":
                         with st.form("block_f"):
-                            p = st.text_input("Enter Pass to BLOCK", type="password")
-                            if st.form_submit_button("BLOCK CARD NOW"):
-                                conn = get_conn()
-                                conn.execute("UPDATE accounts SET account_type='BLOCKED' WHERE account_number=?", (st.session_state.acc_no,))
-                                conn.commit()
-                                st.snow()
-                                st.error("🚫 ACCOUNT BLOCKED SUCCESSFULLY")
-                                st.toast("Security Action Taken", icon="🚫")
-                                st.balloons()
-                             
+                            st.warning("Are you sure you want to block your account?")
+                            p = st.text_input("Enter Password to confirm", type="password")
+                            if st.form_submit_button("BLOCK ACCOUNT NOW"):
+                                u = get_account(st.session_state.acc_no)
+                                if verify_password(p, u[4]):
+                                    conn = get_conn()
+                                    conn.execute("UPDATE accounts SET account_type='BLOCKED' WHERE account_number=?", (st.session_state.acc_no,))
+                                    conn.commit()
+                                    st.snow()
+                                    block_msg = "🚫 ACCOUNT BLOCKED SUCCESSFULLY"
+                                    st.error(block_msg)
+                                    st.session_state.chat_history.append({"role": "assistant", "content": block_msg})
+                                    st.session_state.active_form = None
+                                else:
+                                    st.error("Wrong password. Action cancelled.")
 
+                    # --- GENERAL AI (LLM) LOGIC ---
+                    elif st.session_state.active_form == "llm":
+                        llm = get_llm()
+                        if llm:
+                            with st.spinner("Consulting AI Engine..."):
+                                # Use the persistent command
+                                response = llm.invoke([HumanMessage(content=st.session_state.current_cmd)])
+                                st.write(response.content)
+                                st.session_state.chat_history.append({"role": "assistant", "content": response.content})
+                                st.session_state.active_form = None # Reset to allow new questions
+                        else:
+                            st.error("LLM not configured. Check your API Key.")
                 
 
     # --- HISTORY PAGE ---
